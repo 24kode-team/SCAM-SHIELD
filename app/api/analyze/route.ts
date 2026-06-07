@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const LAMBDA_URL = 'https://cdzmr4gooofye27bo7j4ktgxn40waclm.lambda-url.us-east-1.on.aws/scam';
+
 const WHITELIST = [
   "nationcode.ca", "24kode.com", "mycanada.vercel.app",
   "canada.ca", "gc.ca", "cra-arc.gc.ca", "servicecanada.gc.ca", "ircc.canada.ca",
@@ -47,62 +49,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(whitelisted);
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "API key not configured" }, { status: 500 });
-  }
-
-  const prompt = `You are a scam detection expert for Canada. Analyze this input: "${input}"
-
-Canadian scam red flags:
-- Impersonating CRA, IRCC, Service Canada (CRA never sends SMS)
-- Fake Canadian bank pages (RBC, TD, Scotiabank, BMO, CIBC)
-- Urgency tactics, gift card payment requests
-- Suspicious domains mimicking official sites
-- Prize/lottery scams, SIN number requests
-
-Reply with ONLY valid JSON, no extra text:
-{"riskLevel":"safe","riskScore":0,"category":"Known Site","summary":"Brief reason.","flags":[{"category":"Info","severity":"info","description":"Details."}],"recommendation":"What to do."}
-
-riskLevel: safe | unverified | low | medium | high | danger
-severity: info | low | medium | high`;
-
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      }),
+    const res = await fetch(LAMBDA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input }),
     });
 
-    const raw = await response.text();
+    const raw = await res.text();
     let data;
     try {
       data = JSON.parse(raw);
     } catch {
-      return NextResponse.json({ error: "Invalid response from AI" }, { status: 500 });
+      return NextResponse.json({ error: 'Invalid response from Lambda' }, { status: 500 });
     }
 
-    if (!response.ok) {
-      return NextResponse.json({ error: data.error?.message || "AI analysis failed" }, { status: 500 });
+    if (!res.ok) {
+      return NextResponse.json({ error: data.error || 'Analysis failed' }, { status: 500 });
     }
 
-    const text = data.content?.[0]?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json({ error: "No JSON in response" }, { status: 500 });
-    }
-
-    const result = JSON.parse(jsonMatch[0]);
-    return NextResponse.json(result);
-
+    return NextResponse.json(data);
   } catch (err) {
     console.error("Analysis error:", err);
     return NextResponse.json({ error: "Failed to analyze input" }, { status: 500 });
